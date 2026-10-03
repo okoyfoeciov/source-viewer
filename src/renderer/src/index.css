@@ -1,0 +1,246 @@
+:root {
+  color-scheme: dark;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background-color: #1e1e1e;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  color: #cccccc;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+}
+
+.app {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background-color: #1e1e1e;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background-color: #1e1e1e;
+}
+
+.code-viewer {
+  flex: 1;
+  background-color: #1e1e1e;
+}
+
+.code-viewer pre {
+  min-height: 100%;
+}
+
+/* ---- Custom scrollbar (native bars fully hidden) ---- */
+
+.cs {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+}
+
+.cs-view {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  outline: none;
+  user-select: text;
+  -webkit-user-select: text;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.cs-view::-webkit-scrollbar,
+.cs-view pre::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+.cs-track {
+  position: absolute;
+  background-color: #161616;
+  user-select: none;
+  -webkit-user-select: none;
+  z-index: 5;
+}
+
+.cs-track-v {
+  top: 0;
+  right: 0;
+  width: 12px;
+}
+
+.cs-track-h {
+  left: 0;
+  bottom: 0;
+  height: 12px;
+}
+
+.cs-thumb {
+  position: absolute;
+  background-color: #3d3d3d;
+  cursor: pointer;
+  touch-action: none;
+}
+
+.cs-track-v .cs-thumb {
+  top: 0;
+  left: 0;
+  right: 0;
+}
+
+.cs-track-h .cs-thumb {
+  left: 0;
+  top: 0;
+  bottom: 0;
+}
+
+.cs-thumb:hover {
+  background-color: #505050;
+}
+
+.cs-thumb:active {
+  background-color: #5c5c5c;
+}
+
+.cs-corner {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 12px;
+  height: 12px;
+  background-color: #161616;
+}
+
+.panel-message {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 24px;
+  text-align: center;
+}
+
+.panel-message-title {
+  font-size: 13px;
+  color: #858585;
+}
+
+.panel-message-path {
+  font-size: 12px;
+  font-family: Menlo, Consolas, monospace;
+  color: #5a5a5a;
+  word-break: break-all;
+}
+
+/* ---- Custom titlebar ---- */
+
+.titlebar {
+  height: 40px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-left: 14px;
+  background-color: #181818;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  -webkit-app-region: drag;
+}
+
+.titlebar-left {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  flex: 1;
+}
+
+.titlebar-path {
+  display: flex;
+  align-items: baseline;
+  min-width: 0;
+  font-family: ui-monospace, 'SF Mono', 'Cascadia Code', Menlo, Consolas, monospace;
+  font-size: 14px;
+  letter-spacing: 0;
+  white-space: nowrap;
+}
+
+.titlebar-dir {
+  color: #6e6e6e;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.titlebar-file {
+  color: #d7d7d7;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.titlebar-controls {
+  display: flex;
+  align-items: stretch;
+  height: 100%;
+  -webkit-app-region: no-drag;
+}
+
+.titlebar-btn {
+  width: 46px;
+  height: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: #a0a0a0;
+  cursor: pointer;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+
+.titlebar-btn:hover {
+  background-color: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+}
+
+.titlebar-btn:active {
+  background-color: rgba(255, 255, 255, 0.12);
+}
+
+.titlebar-btn:focus-visible {
+  outline: 1px solid #4d9fff;
+  outline-offset: -1px;
+}
+
+.titlebar-btn-close:hover {
+  background-color: #e81123;
+  color: #ffffff;
+}
+
+.titlebar-btn-close:active {
+  background-color: #c50e1f;
+}
