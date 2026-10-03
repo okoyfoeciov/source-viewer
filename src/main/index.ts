@@ -4,47 +4,94 @@ import { promises as fs } from 'fs'
 import * as path from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 
+import {
+  collectRoots,
+  expandUser,
+  normalizeClipboard,
+  resolveAgainstRoots
+} from './resolve'
+
 const MAX_FILE_SIZE = 5 * 1024 * 1024
 
 let mainWindow: BrowserWindow | null = null
 let openRequest = 0
 
-async function openClipboardPath(win: BrowserWindow): Promise<void> {
-  const request = ++openRequest
-  const text = clipboard.readText().trim()
-  if (!text || !path.isAbsolute(text)) return
-
+async function sendFile(win: BrowserWindow, filePath: string, request: number): Promise<boolean> {
   let stat: { isFile(): boolean; size: number }
   try {
-    stat = await fs.stat(text)
+    stat = await fs.stat(filePath)
   } catch {
     if (request === openRequest) {
-      win.webContents.send('file:open-error', { filePath: text, message: 'File not found' })
+      win.webContents.send('file:open-error', { filePath, message: 'File not found' })
     }
-    return
+    return false
   }
-  if (!stat.isFile() || request !== openRequest) return
+  if (!stat.isFile() || request !== openRequest) return false
   if (stat.size > MAX_FILE_SIZE) {
-    win.webContents.send('file:open-error', { filePath: text, message: 'File too large to preview' })
-    return
+    win.webContents.send('file:open-error', { filePath, message: 'File too large to preview' })
+    return false
   }
 
   try {
-    const content = await fs.readFile(text, 'utf8')
-    if (request !== openRequest) return
+    const content = await fs.readFile(filePath, 'utf8')
+    if (request !== openRequest) return false
     if (content.includes('\0')) {
-      win.webContents.send('file:open-error', { filePath: text, message: 'Binary file, cannot preview' })
-      return
+      win.webContents.send('file:open-error', { filePath, message: 'Binary file, cannot preview' })
+      return false
     }
     win.webContents.send('file:open', {
-      filePath: text,
-      fileName: path.basename(text),
+      filePath,
+      fileName: path.basename(filePath),
       content
     })
+    return true
   } catch {
     if (request === openRequest) {
-      win.webContents.send('file:open-error', { filePath: text, message: 'Could not read file' })
+      win.webContents.send('file:open-error', { filePath, message: 'Could not read file' })
     }
+    return false
+  }
+}
+
+async function openClipboardPath(win: BrowserWindow): Promise<void> {
+  const request = ++openRequest
+  const norm = normalizeClipboard(clipboard.readText())
+  if (!norm) return
+
+  // As-typed first, :line-stripped second (a real `foo:12` file wins).
+  const candidates = norm.raw === norm.stripped ? [norm.raw] : [norm.raw, norm.stripped]
+
+  if (norm.kind === 'absolute') {
+    for (const cand of candidates) {
+      if (await sendFile(win, expandUser(cand), request)) return
+    }
+    if (request === openRequest) {
+      win.webContents.send('file:open-error', { filePath: norm.raw, message: 'File not found' })
+    }
+    return
+  }
+
+  // One tier: every live agent root is consulted; a single match opens,
+  // several show the picker.
+  const roots = await collectRoots()
+  if (request !== openRequest) return
+  for (const cand of candidates) {
+    const matches = await resolveAgainstRoots(roots, expandUser(cand))
+    if (request !== openRequest) return
+    if (matches.length === 1) {
+      await sendFile(win, matches[0], request)
+      return
+    }
+    if (matches.length > 1) {
+      win.webContents.send('file:candidates', { query: norm.raw, paths: matches })
+      return
+    }
+  }
+  if (request === openRequest) {
+    win.webContents.send('file:open-error', {
+      filePath: norm.raw,
+      message: `No match in ${roots.length} known folders`
+    })
   }
 }
 
@@ -106,6 +153,13 @@ function registerWindowControls(): void {
   })
   ipcMain.handle('window:is-maximized', () => {
     return BrowserWindow.getFocusedWindow()?.isMaximized() ?? false
+  })
+  ipcMain.on('file:open-path', (event, filePath: unknown) => {
+    if (typeof filePath !== 'string') return
+    const norm = normalizeClipboard(filePath)
+    if (!norm || norm.kind !== 'absolute') return
+    const win = BrowserWindow.fromWebContents(event.sender)
+    if (win) void sendFile(win, expandUser(norm.raw), ++openRequest)
   })
 }
 

@@ -19,9 +19,16 @@ export interface FileOpenError {
   message: string
 }
 
+export interface FileCandidates {
+  query: string
+  paths: string[]
+}
+
 export interface FilesApi {
   onFileOpen: (cb: (file: OpenedFile) => void) => () => void
   onFileError: (cb: (err: FileOpenError) => void) => () => void
+  onCandidates: (cb: (c: FileCandidates) => void) => () => void
+  openPath: (filePath: string) => void
 }
 
 // Expose a minimal, read-only-safe API surface.
@@ -49,7 +56,13 @@ const files: FilesApi = {
     const listener = (_: unknown, err: FileOpenError): void => cb(err)
     ipcRenderer.on('file:open-error', listener)
     return () => ipcRenderer.removeListener('file:open-error', listener)
-  }
+  },
+  onCandidates: (cb) => {
+    const listener = (_: unknown, c: FileCandidates): void => cb(c)
+    ipcRenderer.on('file:candidates', listener)
+    return () => ipcRenderer.removeListener('file:candidates', listener)
+  },
+  openPath: (filePath: string) => ipcRenderer.send('file:open-path', filePath)
 }
 
 try {

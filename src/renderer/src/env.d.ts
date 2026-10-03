@@ -17,9 +17,16 @@ export interface FileOpenError {
   message: string
 }
 
+export interface FileCandidates {
+  query: string
+  paths: string[]
+}
+
 export interface FilesApi {
   onFileOpen: (cb: (file: OpenedFile) => void) => () => void
   onFileError: (cb: (err: FileOpenError) => void) => () => void
+  onCandidates: (cb: (c: FileCandidates) => void) => () => void
+  openPath: (filePath: string) => void
 }
 
 declare global {

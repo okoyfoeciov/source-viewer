@@ -1,16 +1,19 @@
 import { useEffect, useState } from 'react'
 import TitleBar from './components/TitleBar'
 import CodeViewer from './components/CodeViewer'
-import type { FileOpenError, OpenedFile } from './env'
+import CandidatesPicker from './components/CandidatesPicker'
+import type { FileCandidates, FileOpenError, OpenedFile } from './env'
 
 export default function App(): React.JSX.Element {
   const [file, setFile] = useState<OpenedFile | null>(null)
   const [error, setError] = useState<FileOpenError | null>(null)
+  const [candidates, setCandidates] = useState<FileCandidates | null>(null)
 
   useEffect(() => {
     const offOpen = window.files?.onFileOpen((f) => {
       setFile(f)
       setError(null)
+      setCandidates(null)
     })
     const offError = window.files?.onFileError((e) => {
       // Don't clobber an already-open file with a clipboard error.
@@ -19,9 +22,13 @@ export default function App(): React.JSX.Element {
         return current
       })
     })
+    const offCandidates = window.files?.onCandidates((c) => {
+      setCandidates(c)
+    })
     return () => {
       offOpen?.()
       offError?.()
+      offCandidates?.()
     }
   }, [])
 
@@ -43,6 +50,9 @@ export default function App(): React.JSX.Element {
               Copy an absolute file path, then focus the app
             </span>
           </div>
+        )}
+        {candidates && (
+          <CandidatesPicker candidates={candidates} onClose={() => setCandidates(null)} />
         )}
       </main>
     </div>
