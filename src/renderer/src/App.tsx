@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import TitleBar from './components/TitleBar'
 import CodeViewer from './components/CodeViewer'
+import DiffViewer from './components/DiffViewer'
 import CandidatesPicker from './components/CandidatesPicker'
 import type { FileCandidates, FileOpenError, OpenedFile } from './env'
 
@@ -32,12 +33,36 @@ export default function App(): React.JSX.Element {
     }
   }, [])
 
+  const clearSelection = (): void => {
+    setFile((current) =>
+      current && current.selection ? { ...current, selection: null } : current
+    )
+  }
+
   return (
     <div className="app">
       <TitleBar filePath={file?.filePath ?? null} />
       <main className="content">
         {file ? (
-          <CodeViewer key={file.filePath} fileName={file.fileName} content={file.content} />
+          file.diff ? (
+            <DiffViewer
+              key={`diff:${file.filePath}`}
+              fileName={file.fileName}
+              content={file.content}
+              head={file.head}
+              diff={file.diff}
+              selection={file.selection}
+              onClearSelection={clearSelection}
+            />
+          ) : (
+            <CodeViewer
+              key={file.filePath}
+              fileName={file.fileName}
+              content={file.content}
+              selection={file.selection}
+              onClearSelection={clearSelection}
+            />
+          )
         ) : error ? (
           <div className="panel-message">
             <span className="panel-message-title">{error.message}</span>

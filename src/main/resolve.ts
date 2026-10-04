@@ -9,13 +9,15 @@ const execFileAsync = promisify(execFile)
 export interface NormalizedPath {
   /** As-typed candidate (quotes/whitespace stripped). */
   raw: string
-  /** Candidate with a trailing :line[:col] suffix stripped (== raw when none). */
+  /** Candidate with a trailing :line[:col] or :start-end suffix stripped (== raw when none). */
   stripped: string
   kind: 'absolute' | 'relative'
-  line: number | null
+  /** 1-based target line/range in the opened file, if the suffix named one. */
+  selection: { start: number; end: number } | null
 }
 
 const LINE_SUFFIX = /^(.*?):(\d+)(?::(\d+))?$/
+const RANGE_SUFFIX = /^(.*?):(\d+)-(\d+)$/
 const MAX_MATCHES = 10
 
 /**
@@ -39,14 +41,27 @@ export function normalizeClipboard(input: string): NormalizedPath | null {
   if (/^(https?:\/\/|file:\/\/|mailto:)/i.test(text)) return null
   if (text.startsWith('-')) return null
 
-  // agents love `path/to/file.ts:12` or `:12:3` — keep the line number,
-  // but only treat it as a suffix when the prefix part is path-like.
+  // agents love `path/to/file.ts:12`, `:12:3` or `:12-20` — keep the
+  // line/range, but only treat it as a suffix when the prefix is path-like.
   let stripped = text
-  let line: number | null = null
+  let selection: { start: number; end: number } | null = null
+  const validPrefix = (p: string | undefined): boolean =>
+    !!p && p.length > 0 && !p.endsWith(':')
   const m = LINE_SUFFIX.exec(text)
-  if (m && m[1].length > 0 && !m[1].endsWith(':')) {
-    stripped = m[1]
-    line = parseInt(m[2], 10)
+  const r = RANGE_SUFFIX.exec(text)
+  if (r && validPrefix(r[1])) {
+    const start = parseInt(r[2], 10)
+    const end = parseInt(r[3], 10)
+    if (start >= 1 && end >= start) {
+      stripped = r[1]
+      selection = { start, end }
+    }
+  } else if (m && validPrefix(m[1])) {
+    const line = parseInt(m[2], 10)
+    if (line >= 1) {
+      stripped = m[1]
+      selection = { start: line, end: line }
+    }
   }
 
   // Expand ~ and ./ for the filesystem checks (display keeps raw form).
@@ -58,7 +73,7 @@ export function normalizeClipboard(input: string): NormalizedPath | null {
 
   const probe = expand(stripped)
   if (!probe) return null
-  return { raw: text, stripped, kind: path.isAbsolute(probe) ? 'absolute' : 'relative', line }
+  return { raw: text, stripped, kind: path.isAbsolute(probe) ? 'absolute' : 'relative', selection }
 }
 
 /** Expand a NormalizedPath into ordered filesystem candidates (deduped). */
@@ -66,6 +81,38 @@ export function expandUser(p: string): string {
   if (p === '~' || p.startsWith('~/')) return path.join(os.homedir(), p.slice(1))
   if (p.startsWith('./')) return p.slice(2)
   return p
+}
+
+const PUBLISHED_DIRS = ['out', 'lib', 'dist', 'build']
+
+/**
+ * Agents often cite TypeScript sources (stack traces, source maps) that
+ * published node_modules don't ship — only compiled output. If an absolute
+ * `<pkg>/src/name.ts(x)` is missing, try its published counterpart
+ * (`out/`, `lib/`, `dist/`, `build/` + `.js`, then `.d.ts`).
+ */
+export async function resolvePublishedFallback(absPath: string): Promise<string | null> {
+  if (!absPath.endsWith('.ts') && !absPath.endsWith('.tsx')) return null
+  const marker = '/node_modules/'
+  const idx = absPath.lastIndexOf(marker)
+  if (idx === -1) return null
+  const after = absPath.slice(idx + marker.length)
+  const m = /^(.*)\/src\/(.*)\.tsx?$/.exec(after)
+  if (!m) return null
+  const base = absPath.slice(0, idx + marker.length) + m[1]
+  const rest = m[2]
+  for (const dir of PUBLISHED_DIRS) {
+    for (const ext of ['.js', '.d.ts']) {
+      const cand = `${base}/${dir}/${rest}${ext}`
+      try {
+        const stat = await fs.stat(cand)
+        if (stat.isFile()) return cand
+      } catch {
+        // Try the next candidate.
+      }
+    }
+  }
+  return null
 }
 
 /**

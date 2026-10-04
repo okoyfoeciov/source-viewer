@@ -12,6 +12,9 @@ export interface OpenedFile {
   filePath: string
   fileName: string
   content: string
+  diff: string | null
+  head: string | null
+  selection: { start: number; end: number } | null
 }
 
 export interface FileOpenError {

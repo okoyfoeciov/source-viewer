@@ -1,4 +1,5 @@
 import { app, BrowserWindow, clipboard, ipcMain } from 'electron'
+import { execFile } from 'child_process'
 import { join } from 'path'
 import { promises as fs } from 'fs'
 import * as path from 'path'
@@ -9,21 +10,35 @@ import {
   expandUser,
   normalizeClipboard,
   resolveAgainstRoots,
-  resolveInDir
+  resolveInDir,
+  resolvePublishedFallback
 } from './resolve'
 import { FocusWatcher } from './focus'
+import { getFileDiff } from './git'
+import { shouldHandle, shouldResendPicker } from './clipwatch'
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024
 
 let mainWindow: BrowserWindow | null = null
 let openRequest = 0
 const focusWatcher = new FocusWatcher()
+let dedupeState: { raw: string; at: number } | null = null
+let pickerSquelch: { query: string; until: number } | null = null
 
-async function sendFile(win: BrowserWindow, filePath: string, request: number): Promise<boolean> {
+async function sendFile(
+  win: BrowserWindow,
+  filePath: string,
+  request: number,
+  selection: { start: number; end: number } | null
+): Promise<boolean> {
   let stat: { isFile(): boolean; size: number }
   try {
     stat = await fs.stat(filePath)
   } catch {
+    // TypeScript sources often don't ship in node_modules — try the
+    // published compiled counterpart before reporting it missing.
+    const alt = await resolvePublishedFallback(filePath)
+    if (alt && request === openRequest) return sendFile(win, alt, request, selection)
     if (request === openRequest) {
       win.webContents.send('file:open-error', { filePath, message: 'File not found' })
     }
@@ -36,7 +51,11 @@ async function sendFile(win: BrowserWindow, filePath: string, request: number): 
   }
 
   try {
-    const content = await fs.readFile(filePath, 'utf8')
+    // Content and diff are independent — fetch concurrently.
+    const [content, git] = await Promise.all([
+      fs.readFile(filePath, 'utf8'),
+      request === openRequest ? getFileDiff(filePath) : Promise.resolve(null)
+    ])
     if (request !== openRequest) return false
     if (content.includes('\0')) {
       win.webContents.send('file:open-error', { filePath, message: 'Binary file, cannot preview' })
@@ -45,7 +64,10 @@ async function sendFile(win: BrowserWindow, filePath: string, request: number): 
     win.webContents.send('file:open', {
       filePath,
       fileName: path.basename(filePath),
-      content
+      content,
+      diff: git?.diff ?? null,
+      head: git?.head ?? null,
+      selection
     })
     return true
   } catch {
@@ -57,21 +79,77 @@ async function sendFile(win: BrowserWindow, filePath: string, request: number): 
 }
 
 async function openClipboardPath(win: BrowserWindow): Promise<void> {
+  const opened = await handleClipboardText(win, clipboard.readText())
+  if (opened) consumeClipboard()
+}
+
+/** Clear the clipboard so a consumed path can't retrigger. Never throws. */
+function consumeClipboard(): void {
+  try {
+    clipboard.clear()
+  } catch {
+    // A stuck clipboard just means a possible duplicate open later.
+  }
+  if (process.platform === 'linux') {
+    // Electron clipboard writes are black-holed on native Wayland
+    // (verified: neither clear() nor writeText() reaches the compositor),
+    // while `wl-copy --clear` genuinely clears. Best-effort fallback.
+    try {
+      execFile('wl-copy', ['--clear'], { timeout: 2000 }, () => {})
+    } catch {
+      // No wl-copy present — clipboard.clear() above is the fallback.
+    }
+  }
+}
+
+/**
+ * Resolve clipboard text to a file and open it. Returns true when a file
+ * was opened (caller clears the clipboard so it can't retrigger).
+ */
+async function handleClipboardText(win: BrowserWindow, raw: string): Promise<boolean> {
+  const decision = shouldHandle(raw, dedupeState, Date.now())
+  dedupeState = decision.state
+  if (!decision.handle) return false
+
+  try {
+    return await resolveAndOpen(win, raw)
+  } catch {
+    // Never fail silently: an unexpected error must surface in the UI,
+    // otherwise the clipboard poisons and identical recopies stay mute.
+    if (!win.isDestroyed()) {
+      try {
+        win.webContents.send('file:open-error', {
+          filePath: raw.slice(0, 200),
+          message: 'Could not open clipboard path'
+        })
+      } catch {
+        // Renderer gone — nothing left to tell.
+      }
+    }
+    return false
+  }
+}
+
+async function resolveAndOpen(win: BrowserWindow, raw: string): Promise<boolean> {
   const request = ++openRequest
-  const norm = normalizeClipboard(clipboard.readText())
-  if (!norm) return
+  const norm = normalizeClipboard(raw)
+  if (!norm) return false
 
   // As-typed first, :line-stripped second (a real `foo:12` file wins).
   const candidates = norm.raw === norm.stripped ? [norm.raw] : [norm.raw, norm.stripped]
 
+  // Start the live-roots scan immediately so it overlaps tier 0 on a miss.
+  // collectRoots never rejects; the promise is only awaited if needed.
+  const rootsPromise = collectRoots()
+
   if (norm.kind === 'absolute') {
     for (const cand of candidates) {
-      if (await sendFile(win, expandUser(cand), request)) return
+      if (await sendFile(win, expandUser(cand), request, norm.selection)) return true
     }
     if (request === openRequest) {
       win.webContents.send('file:open-error', { filePath: norm.raw, message: 'File not found' })
     }
-    return
+    return false
   }
 
   // Tier 0: the focused terminal's foreground agent cwd. Single root —
@@ -82,10 +160,9 @@ async function openClipboardPath(win: BrowserWindow): Promise<void> {
     if (focus) {
       for (const cand of candidates) {
         const hit = await resolveInDir(focus.cwd, expandUser(cand))
-        if (request !== openRequest) return
+        if (request !== openRequest) return false
         if (hit) {
-          await sendFile(win, hit, request)
-          return
+          return await sendFile(win, hit, request, norm.selection)
         }
       }
     }
@@ -93,18 +170,25 @@ async function openClipboardPath(win: BrowserWindow): Promise<void> {
 
   // One tier: every live agent root is consulted; a single match opens,
   // several show the picker.
-  const roots = await collectRoots()
-  if (request !== openRequest) return
+  const roots = await rootsPromise
+  if (request !== openRequest) return false
   for (const cand of candidates) {
     const matches = await resolveAgainstRoots(roots, expandUser(cand))
-    if (request !== openRequest) return
+    if (request !== openRequest) return false
     if (matches.length === 1) {
-      await sendFile(win, matches[0], request)
-      return
+      pickerSquelch = null
+      return await sendFile(win, matches[0], request, norm.selection)
     }
     if (matches.length > 1) {
-      win.webContents.send('file:candidates', { query: norm.raw, paths: matches })
-      return
+      const decision = shouldResendPicker(norm.raw, pickerSquelch, Date.now())
+      pickerSquelch = decision.squelch
+      if (decision.send) {
+        win.webContents.send('file:candidates', { query: norm.raw, paths: matches })
+        // Prompting consumes the query: no re-prompt on refocus, and the
+        // squelch above stays armed for copies made before this clear lands.
+        consumeClipboard()
+      }
+      return false
     }
   }
   if (request === openRequest) {
@@ -113,6 +197,7 @@ async function openClipboardPath(win: BrowserWindow): Promise<void> {
       message: `No match in ${roots.length} known folders`
     })
   }
+  return false
 }
 
 function createWindow(): void {
@@ -179,7 +264,11 @@ function registerWindowControls(): void {
     const norm = normalizeClipboard(filePath)
     if (!norm || norm.kind !== 'absolute') return
     const win = BrowserWindow.fromWebContents(event.sender)
-    if (win) void sendFile(win, expandUser(norm.raw), ++openRequest)
+    if (win) {
+      void sendFile(win, expandUser(norm.raw), ++openRequest, null).then((opened) => {
+        if (opened) consumeClipboard()
+      })
+    }
   })
 }
 

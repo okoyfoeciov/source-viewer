@@ -1,32 +1,41 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react'
+import { sliderRatio, thumbGeometry } from '../scrollMath'
 
 const TRACK_SIZE = 12
-const THUMB_INSET = 0
-const MIN_THUMB = 32
 
 interface DragState {
   axis: 'v' | 'h'
   pointerId: number
   startPointer: number
   startScroll: number
-  trackTravel: number
-  scrollMax: number
+  /** Track px per content px at dragstart (VSCode's computedSliderRatio). */
+  ratio: number
 }
 
 interface CustomScrollProps {
   className?: string
   children: ReactNode
+  annotations?: Array<{ top: number; height: number; kind: 'add' | 'del' }>
+  /** New-file line number to scroll into view (centered); null disables. */
+  revealLine?: number | null
 }
 
-export default function CustomScroll({ className, children }: CustomScrollProps): React.JSX.Element {
+export default function CustomScroll({
+  className,
+  children,
+  annotations,
+  revealLine = null
+}: CustomScrollProps): React.JSX.Element {
   const viewRef = useRef<HTMLDivElement>(null)
+  const vTrackRef = useRef<HTMLDivElement>(null)
   const vThumbRef = useRef<HTMLDivElement>(null)
   const hThumbRef = useRef<HTMLDivElement>(null)
   const posRef = useRef({ v: 0, h: 0, vSize: 0, hSize: 0 })
   const dragRef = useRef<DragState | null>(null)
   const [vVisible, setVVisible] = useState(false)
   const [hVisible, setHVisible] = useState(false)
+  const [vTrackH, setVTrackH] = useState(0)
 
   const sync = useCallback(() => {
     const el = viewRef.current
@@ -37,34 +46,28 @@ export default function CustomScroll({ className, children }: CustomScrollProps)
     const showH = scrollWidth > clientWidth + 1
     setVVisible(showV)
     setHVisible(showH)
+    const trackH = vTrackRef.current?.clientHeight ?? 0
+    setVTrackH((prev) => (prev === trackH ? prev : trackH))
 
-    // Vertical thumb: track spans view height minus horizontal track.
+    // Vertical thumb (bottom-anchored: thumb bottom fraction == viewport bottom fraction).
     const vth = vThumbRef.current
     if (vth && showV && scrollHeight > clientHeight) {
       const vTrackLen = clientHeight - (showH ? TRACK_SIZE : 0)
-      const thumbLen = Math.min(
-        vTrackLen - THUMB_INSET * 2,
-        Math.max(MIN_THUMB, (clientHeight / scrollHeight) * vTrackLen)
-      )
-      const top = (scrollTop / (scrollHeight - clientHeight)) * (vTrackLen - thumbLen)
+      const { top, size } = thumbGeometry(scrollTop, scrollHeight, clientHeight, vTrackLen)
       posRef.current.v = top
-      posRef.current.vSize = thumbLen
-      vth.style.height = `${thumbLen}px`
+      posRef.current.vSize = size
+      vth.style.height = `${size}px`
       vth.style.transform = `translateY(${top}px)`
     }
 
-    // Horizontal thumb: track spans view width minus vertical track.
+    // Horizontal thumb.
     const hth = hThumbRef.current
     if (hth && showH && scrollWidth > clientWidth) {
       const trackLen = clientWidth - (showV ? TRACK_SIZE : 0)
-      const thumbLen = Math.min(
-        trackLen - THUMB_INSET * 2,
-        Math.max(MIN_THUMB, (clientWidth / scrollWidth) * trackLen)
-      )
-      const left = (scrollLeft / (scrollWidth - clientWidth)) * (trackLen - thumbLen)
+      const { top: left, size } = thumbGeometry(scrollLeft, scrollWidth, clientWidth, trackLen)
       posRef.current.h = left
-      posRef.current.hSize = thumbLen
-      hth.style.width = `${thumbLen}px`
+      posRef.current.hSize = size
+      hth.style.width = `${size}px`
       hth.style.transform = `translateX(${left}px)`
     }
   }, [])
@@ -77,6 +80,13 @@ export default function CustomScroll({ className, children }: CustomScrollProps)
     ro.observe(el)
     return () => ro.disconnect()
   }, [sync, children])
+
+  useEffect(() => {
+    if (revealLine === null || revealLine === undefined) return
+    viewRef.current
+      ?.querySelector(`[data-lno="${revealLine}"]`)
+      ?.scrollIntoView({ block: 'center' })
+  }, [revealLine, children])
 
   const beginDrag =
     (axis: 'v' | 'h') =>
@@ -95,24 +105,25 @@ export default function CustomScroll({ className, children }: CustomScrollProps)
         axis === 'v'
           ? el.clientHeight - (hVisible ? TRACK_SIZE : 0)
           : el.clientWidth - (vVisible ? TRACK_SIZE : 0)
+      const scrollSize = axis === 'v' ? el.scrollHeight : el.scrollWidth
+      const clientSize = axis === 'v' ? el.clientHeight : el.clientWidth
       const thumbLen = axis === 'v' ? thumb.clientHeight : thumb.clientWidth
       dragRef.current = {
         axis,
         pointerId: e.pointerId,
         startPointer: axis === 'v' ? e.clientY : e.clientX,
         startScroll: axis === 'v' ? el.scrollTop : el.scrollLeft,
-        trackTravel: Math.max(1, trackLen - thumbLen),
-        scrollMax:
-          axis === 'v' ? el.scrollHeight - el.clientHeight : el.scrollWidth - el.clientWidth
+        ratio: sliderRatio(scrollSize, clientSize, trackLen, thumbLen)
       }
     }
 
   const onDragMove = (e: ReactPointerEvent<HTMLDivElement>): void => {
     const d = dragRef.current
     const el = viewRef.current
-    if (!d || !el || e.pointerId !== d.pointerId) return
+    if (!d || !el || e.pointerId !== d.pointerId || d.ratio <= 0) return
     const pointer = d.axis === 'v' ? e.clientY : e.clientX
-    const next = d.startScroll + ((pointer - d.startPointer) * d.scrollMax) / d.trackTravel
+    // VSCode getDesiredScrollPositionFromDelta: move by delta / ratio.
+    const next = d.startScroll + (pointer - d.startPointer) / d.ratio
     if (d.axis === 'v') el.scrollTop = next
     else el.scrollLeft = next
   }
@@ -132,11 +143,12 @@ export default function CustomScroll({ className, children }: CustomScrollProps)
       if (axis === 'v') {
         const clickY = e.clientY - rect.top
         const center = posRef.current.v + posRef.current.vSize / 2
-        el.scrollBy({ top: (clickY < center ? -1 : 1) * el.clientHeight * 0.9 })
+        // VSCode pages by a full viewport, not jump-to-position.
+        el.scrollBy({ top: (clickY < center ? -1 : 1) * el.clientHeight })
       } else {
         const clickX = e.clientX - rect.left
         const center = posRef.current.h + posRef.current.hSize / 2
-        el.scrollBy({ left: (clickX < center ? -1 : 1) * el.clientWidth * 0.9 })
+        el.scrollBy({ left: (clickX < center ? -1 : 1) * el.clientWidth })
       }
     }
 
@@ -147,10 +159,26 @@ export default function CustomScroll({ className, children }: CustomScrollProps)
       </div>
       {vVisible && (
         <div
+          ref={vTrackRef}
           className="cs-track cs-track-v"
           style={{ bottom: hVisible ? TRACK_SIZE : 0 }}
           onPointerDown={onTrackDown('v')}
         >
+          {annotations?.map((a, i) => {
+            // VSCode MIN_DECORATION_HEIGHT: sub-6px runs become centered 6px blocks.
+            const pxTop = a.top * vTrackH
+            const pxH = a.height * vTrackH
+            const style =
+              vTrackH > 0 && pxH < 6
+                ? {
+                    top: Math.min(Math.max(pxTop + pxH / 2 - 3, 0), Math.max(0, vTrackH - 6)),
+                    height: Math.min(6, vTrackH)
+                  }
+                : { top: `${a.top * 100}%`, height: `${Math.max(a.height * 100, 0.4)}%` }
+            return (
+              <div key={i} className={`cs-marker cs-marker-${a.kind}`} style={style} />
+            )
+          })}
           <div
             ref={vThumbRef}
             className="cs-thumb"
