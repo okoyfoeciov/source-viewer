@@ -5,11 +5,13 @@
   "main": "out/main/index.js",
   "author": "okoyfoeciov <92897177+okoyfoeciov@users.noreply.github.com>",
   "license": "MIT",
+  "desktopName": "com.sourceviewer.app",
   "type": "commonjs",
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "build:dist": "npm run build && electron-builder",
+    "dist:linux": "npm run build && electron-builder --linux",
     "preview": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json"
   },
@@ -52,7 +54,9 @@
         "AppImage",
         "deb"
       ],
-      "category": "Development"
+      "icon": "build/icon.png",
+      "category": "Development",
+      "syncDesktopName": true
     }
   }
 }
