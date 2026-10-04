@@ -1,11 +1,13 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import CustomScroll from './CustomScroll'
 import { buildFullFile, markersForLines, parseUnifiedDiff } from '../diff'
 import type { FullLine } from '../diff'
 import { detectLanguage, escapeHtml, highlightLines } from '../highlight'
+import { copyText, formatLineRef } from '../copy'
 import 'highlight.js/styles/vs2015.css'
 
 interface DiffViewerProps {
+  filePath: string
   fileName: string
   content: string
   /** HEAD version of the file; null when unavailable (then deletions render plain). */
@@ -18,6 +20,7 @@ interface DiffViewerProps {
 const MONO = "'SF Mono', Menlo, Consolas, monospace"
 
 export default function DiffViewer({
+  filePath,
   fileName,
   content,
   head,
@@ -35,6 +38,42 @@ export default function DiffViewer({
     const ls = buildFullFile(content, parseUnifiedDiff(diff))
     return { lines: ls, markers: markersForLines(ls) }
   }, [content, diff])
+
+  const [anchor, setAnchor] = useState<number | null>(null)
+  const [current, setCurrent] = useState<number | null>(null)
+  const [copiedRef, setCopiedRef] = useState<string | null>(null)
+  const anchorRef = useRef<number | null>(null)
+  const currentRef = useRef<number | null>(null)
+  const toastTimer = useRef<number | null>(null)
+
+  useEffect(
+    () => () => {
+      if (toastTimer.current !== null) window.clearTimeout(toastTimer.current)
+    },
+    []
+  )
+
+  useEffect(() => {
+    const onUp = (): void => {
+      const a = anchorRef.current
+      const c = currentRef.current
+      if (a === null || c === null) return
+      anchorRef.current = null
+      currentRef.current = null
+      setAnchor(null)
+      setCurrent(null)
+      const ref = formatLineRef(filePath, a, c)
+      void copyText(ref).then((ok) => {
+        if (ok) {
+          setCopiedRef(ref)
+          if (toastTimer.current !== null) window.clearTimeout(toastTimer.current)
+          toastTimer.current = window.setTimeout(() => setCopiedRef(null), 1500)
+        }
+      })
+    }
+    window.addEventListener('mouseup', onUp)
+    return () => window.removeEventListener('mouseup', onUp)
+  }, [filePath])
 
   const htmlFor = (line: FullLine): string => {
     if (line.type === 'del') {
@@ -55,6 +94,31 @@ export default function DiffViewer({
     line.newNo >= selection.start &&
     line.newNo <= selection.end
 
+  const inDrag = (line: FullLine): boolean => {
+    if (anchor === null || current === null || line.newNo === null) return false
+    const lo = Math.min(anchor, current)
+    const hi = Math.max(anchor, current)
+    return line.newNo >= lo && line.newNo <= hi
+  }
+
+  const onGutterDown =
+    (newNo: number | null) =>
+    (e: React.MouseEvent): void => {
+      if (newNo === null) return
+      e.stopPropagation()
+      e.preventDefault()
+      anchorRef.current = newNo
+      currentRef.current = newNo
+      setAnchor(newNo)
+      setCurrent(newNo)
+    }
+
+  const onGutterEnter = (newNo: number | null): void => {
+    if (anchorRef.current === null || newNo === null) return
+    currentRef.current = newNo
+    setCurrent(newNo)
+  }
+
   return (
     <CustomScroll
       className="code-viewer"
@@ -67,13 +131,27 @@ export default function DiffViewer({
             key={i}
             data-lno={line.newNo ?? undefined}
             className={
-              inSelection(line)
+              inSelection(line) || inDrag(line)
                 ? `diff-line diff-line-${line.type} diff-line-selected`
                 : `diff-line diff-line-${line.type}`
             }
           >
             <span className="diff-gutter">{line.oldNo ?? ''}</span>
-            <span className="diff-gutter">{line.newNo ?? ''}</span>
+            <span
+              className={
+                line.newNo !== null
+                  ? 'diff-gutter diff-gutter-copyable'
+                  : 'diff-gutter'
+              }
+              title={
+                line.newNo !== null ? 'Click to copy line ref, drag for range' : undefined
+              }
+              onMouseDown={onGutterDown(line.newNo)}
+              onMouseEnter={() => onGutterEnter(line.newNo)}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {line.newNo ?? ''}
+            </span>
             <span className="diff-sign">
               {line.type === 'add' ? '+' : line.type === 'del' ? '−' : ' '}
             </span>
@@ -84,6 +162,7 @@ export default function DiffViewer({
           </div>
         ))}
       </div>
+      {copiedRef && <div className="copy-toast">{copiedRef}</div>}
     </CustomScroll>
   )
 }

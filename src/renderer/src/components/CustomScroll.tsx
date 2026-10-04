@@ -33,6 +33,8 @@ export default function CustomScroll({
   const hThumbRef = useRef<HTMLDivElement>(null)
   const posRef = useRef({ v: 0, h: 0, vSize: 0, hSize: 0 })
   const dragRef = useRef<DragState | null>(null)
+  /** Last revealLine already scrolled to. Guards the reveal effect below. */
+  const lastRevealRef = useRef<number | null | undefined>(undefined)
   const [vVisible, setVVisible] = useState(false)
   const [hVisible, setHVisible] = useState(false)
   const [vTrackH, setVTrackH] = useState(0)
@@ -82,11 +84,21 @@ export default function CustomScroll({
   }, [sync, children])
 
   useEffect(() => {
-    if (revealLine === null || revealLine === undefined) return
+    if (revealLine === null || revealLine === undefined) {
+      lastRevealRef.current = revealLine
+      return
+    }
+    // Scroll only for a *new* reveal target. `children` is a fresh element
+    // identity on every parent render, so depending on it re-centered the
+    // viewport on unrelated state changes — e.g. clicking a gutter number
+    // (or the copy toast appearing) after scrolling away yanked the screen
+    // back to the opened selection.
+    if (lastRevealRef.current === revealLine) return
+    lastRevealRef.current = revealLine
     viewRef.current
       ?.querySelector(`[data-lno="${revealLine}"]`)
       ?.scrollIntoView({ block: 'center' })
-  }, [revealLine, children])
+  }, [revealLine])
 
   const beginDrag =
     (axis: 'v' | 'h') =>

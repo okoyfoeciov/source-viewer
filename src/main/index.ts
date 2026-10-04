@@ -1,5 +1,5 @@
 import { app, BrowserWindow, clipboard, ipcMain } from 'electron'
-import { execFile } from 'child_process'
+import { execFile, spawn } from 'child_process'
 import { join } from 'path'
 import { promises as fs } from 'fs'
 import * as path from 'path'
@@ -24,6 +24,13 @@ let openRequest = 0
 const focusWatcher = new FocusWatcher()
 let dedupeState: { raw: string; at: number } | null = null
 let pickerSquelch: { query: string; until: number } | null = null
+/**
+ * Last text copied *from inside the app* (title bar / gutter click-drag).
+ * The focus watcher opens whatever is in the clipboard, so without this an
+ * in-app copy would reopen the current file on next focus — and worse,
+ * `consumeClipboard()` would wipe the text the user just copied.
+ */
+let lastInternalCopy: string | null = null
 
 async function sendFile(
   win: BrowserWindow,
@@ -107,6 +114,13 @@ function consumeClipboard(): void {
  * was opened (caller clears the clipboard so it can't retrigger).
  */
 async function handleClipboardText(win: BrowserWindow, raw: string): Promise<boolean> {
+  // Text we copied ourselves must never trigger an open: the file is already
+  // on screen, and handling it would consume (clear) the user's just-copied
+  // text. A different clipboard means ours was overwritten — drop the guard.
+  if (lastInternalCopy !== null) {
+    if (raw === lastInternalCopy) return false
+    lastInternalCopy = null
+  }
   const decision = shouldHandle(raw, dedupeState, Date.now())
   dedupeState = decision.state
   if (!decision.handle) return false
@@ -244,6 +258,33 @@ function createWindow(): void {
 }
 
 function registerWindowControls(): void {
+  ipcMain.handle('clipboard:write-text', (_, text: unknown) => {
+    if (typeof text !== 'string' || text.length === 0) return
+    // Record before writing: this marks the clipboard as ours so the focus
+    // watcher in handleClipboardText skips it instead of reopening it.
+    lastInternalCopy = text
+    try {
+      clipboard.writeText(text)
+    } catch {
+      // Fall through to the wl-copy attempt below on Linux.
+    }
+    if (process.platform === 'linux') {
+      // Electron clipboard writes are black-holed on native Wayland,
+      // so mirror through wl-copy (best-effort).
+      try {
+        const child = spawn('wl-copy', [], { stdio: ['pipe', 'ignore', 'ignore'] })
+        child.on('error', () => {})
+        try {
+          child.stdin?.write(text)
+          child.stdin?.end()
+        } catch {
+          // Pipe broken — clipboard.writeText above is the fallback.
+        }
+      } catch {
+        // No wl-copy present — clipboard.writeText above is the fallback.
+      }
+    }
+  })
   ipcMain.on('window:minimize', () => {
     BrowserWindow.getFocusedWindow()?.minimize()
   })

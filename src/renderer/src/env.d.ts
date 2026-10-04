@@ -32,10 +32,15 @@ export interface FilesApi {
   openPath: (filePath: string) => void
 }
 
+export interface ElectronClipboard {
+  writeText: (text: string) => Promise<void>
+}
+
 declare global {
   interface Window {
     api: Record<string, never>
     windowControls: WindowControls
     files: FilesApi
+    electronClipboard: ElectronClipboard
   }
 }

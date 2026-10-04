@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { copyText } from '../copy'
 
 function MinimizeIcon(): React.JSX.Element {
   return (
@@ -70,20 +71,33 @@ export default function TitleBar({ filePath }: TitleBarProps): React.JSX.Element
   const toggle = (): void => window.windowControls?.toggleMaximize()
   const parts = filePath ? splitPath(filePath) : null
 
+  const copyPath = async (): Promise<void> => {
+    if (!filePath) return
+    await copyText(filePath)
+  }
+
   return (
     <header
       className="titlebar"
       onDoubleClick={(e) => {
-        if ((e.target as HTMLElement).closest('.titlebar-btn')) return
+        if ((e.target as HTMLElement).closest('.titlebar-btn, .titlebar-path')) return
         toggle()
       }}
     >
       <div className="titlebar-left">
         {parts && (
-          <span className="titlebar-path" title={filePath ?? ''}>
+          <button
+            className="titlebar-path"
+            title={`${filePath ?? ''} — click to copy`}
+            onClick={(e) => {
+              e.stopPropagation()
+              void copyPath()
+            }}
+            onDoubleClick={(e) => e.stopPropagation()}
+          >
             <span className="titlebar-dir">{parts.dir}/</span>
             <span className="titlebar-file">{parts.base}</span>
-          </span>
+          </button>
         )}
       </div>
       <div className="titlebar-controls">

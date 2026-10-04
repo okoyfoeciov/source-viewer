@@ -34,6 +34,10 @@ export interface FilesApi {
   openPath: (filePath: string) => void
 }
 
+export interface ElectronClipboard {
+  writeText: (text: string) => Promise<void>
+}
+
 // Expose a minimal, read-only-safe API surface.
 const api = {} as const
 
@@ -68,10 +72,15 @@ const files: FilesApi = {
   openPath: (filePath: string) => ipcRenderer.send('file:open-path', filePath)
 }
 
+const electronClipboard: ElectronClipboard = {
+  writeText: (text: string) => ipcRenderer.invoke('clipboard:write-text', text)
+}
+
 try {
   contextBridge.exposeInMainWorld('api', api)
   contextBridge.exposeInMainWorld('windowControls', windowControls)
   contextBridge.exposeInMainWorld('files', files)
+  contextBridge.exposeInMainWorld('electronClipboard', electronClipboard)
 } catch {
   // Context bridge unavailable (shouldn't happen with contextIsolation on)
 }

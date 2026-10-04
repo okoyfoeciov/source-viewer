@@ -47,6 +47,7 @@ export default function App(): React.JSX.Element {
           file.diff ? (
             <DiffViewer
               key={`diff:${file.filePath}`}
+              filePath={file.filePath}
               fileName={file.fileName}
               content={file.content}
               head={file.head}
@@ -57,6 +58,7 @@ export default function App(): React.JSX.Element {
           ) : (
             <CodeViewer
               key={file.filePath}
+              filePath={file.filePath}
               fileName={file.fileName}
               content={file.content}
               selection={file.selection}
