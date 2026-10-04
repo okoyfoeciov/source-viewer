@@ -1,8 +1,10 @@
-# CD: .deb built from latest master, published to the v1.0.0 tag.
+# CD: .deb + .dmg built from latest master, published to the v1.0.0 tag.
 #
 # Runs on every push to master (plus manual dispatch). It builds the .deb
-# on Linux, then (re)publishes it to the v1.0.0 release, clobbering the
-# previous asset — same pattern as ~/cairn's release.yml.
+# on Linux and the .dmg on macOS (electron-builder ad-hoc signs when no
+# Developer ID is present; no notarization, same as ~/cairn's ruling),
+# then (re)publishes both to the v1.0.0 release, clobbering the previous
+# assets — same pattern as ~/cairn's release.yml.
 #
 # No version automation: there is exactly one version, 1.0.0, and this
 # file names it outright. Bump package.json + the tag below together.
@@ -51,8 +53,31 @@ jobs:
           path: dist/*.deb
           if-no-files-found: error
 
+  dmg:
+    runs-on: macos-14
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build the .dmg
+        run: npm run dist:mac
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dmg
+          path: dist/*.dmg
+          if-no-files-found: error
+
   publish:
-    needs: [deb]
+    needs: [deb, dmg]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -72,7 +97,7 @@ jobs:
           if ! gh release view v1.0.0 >/dev/null 2>&1; then
             gh release create v1.0.0 \
               --title "Source Viewer 1.0.0" \
-              --notes "Source Viewer 1.0.0 build from latest master. Debian: sudo apt install ./source-viewer_1.0.0_amd64.deb." \
+              --notes "Source Viewer 1.0.0 build from latest master. Debian: sudo apt install ./source-viewer_1.0.0_amd64.deb. macOS: open the .dmg (ad-hoc signed, no notarization)." \
               --latest
           fi
-          gh release upload v1.0.0 ./*.deb --clobber
+          gh release upload v1.0.0 ./*.deb ./*.dmg --clobber
