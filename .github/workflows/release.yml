@@ -1,13 +1,13 @@
-# CD: .deb built from latest master, published to the v0.1.0 tag.
+# CD: .deb built from latest master, published to the v1.0.0 tag.
 #
 # Runs on every push to master (plus manual dispatch). It builds the .deb
-# on Linux, then (re)publishes it to the v0.1.0 release, clobbering the
+# on Linux, then (re)publishes it to the v1.0.0 release, clobbering the
 # previous asset — same pattern as ~/cairn's release.yml.
 #
-# No version automation: there is exactly one version, 0.1.0, and this
+# No version automation: there is exactly one version, 1.0.0, and this
 # file names it outright. Bump package.json + the tag below together.
 
-name: Release 0.1.0
+name: Release 1.0.0
 
 on:
   push:
@@ -18,7 +18,7 @@ on:
 # publish step uploads with --clobber, so a cancelled run can never leave
 # the release half-updated.
 concurrency:
-  group: release-0.1.0
+  group: release-1.0.0
   cancel-in-progress: true
 
 permissions:
@@ -56,7 +56,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      # gh release create tags v0.1.0, and tagging needs the git directory.
+      # gh release create tags v1.0.0, and tagging needs the git directory.
       - uses: actions/checkout@v4
 
       - uses: actions/download-artifact@v4
@@ -64,15 +64,15 @@ jobs:
           path: dist
           merge-multiple: true
 
-      - name: Publish the v0.1.0 release
+      - name: Publish the v1.0.0 release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           cd dist
-          if ! gh release view v0.1.0 >/dev/null 2>&1; then
-            gh release create v0.1.0 \
-              --title "Source Viewer 0.1.0" \
-              --notes "Source Viewer 0.1.0 build from latest master. Debian: sudo apt install ./source-viewer_0.1.0_amd64.deb." \
+          if ! gh release view v1.0.0 >/dev/null 2>&1; then
+            gh release create v1.0.0 \
+              --title "Source Viewer 1.0.0" \
+              --notes "Source Viewer 1.0.0 build from latest master. Debian: sudo apt install ./source-viewer_1.0.0_amd64.deb." \
               --latest
           fi
-          gh release upload v0.1.0 ./*.deb --clobber
+          gh release upload v1.0.0 ./*.deb --clobber
