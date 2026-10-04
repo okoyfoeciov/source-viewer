@@ -166,18 +166,42 @@ async function resolveAndOpen(win: BrowserWindow, raw: string): Promise<boolean>
     return false
   }
 
-  // Tier 0: the focused terminal's foreground agent cwd. Single root —
-  // hit opens immediately, miss falls through (existence is always checked,
-  // so a stale reading can never open the wrong file).
+  // Tier 0: the focused tab's working dir. Exact readings (Linux Konsole
+  // foreground agent, Ghostty ≥1.4 foreground pid + lsof) trust a single
+  // root — hit opens immediately. Inexact readings (Ghostty 1.3 shell cwd,
+  // which can't tell apart tabs sharing a shell dir such as repo root vs
+  // nested worktree) widen with contained live-agent dirs, but then a
+  // single hit opens while several hits defer to the live-roots tier
+  // below, which shows the picker instead of silently opening the wrong
+  // copy. Existence is always checked, so a stale reading can never open
+  // the wrong file.
   if (norm.kind === 'relative') {
-    const focus = focusWatcher.getLast()
+    const focus = await focusWatcher.getFocus()
     if (focus) {
-      for (const cand of candidates) {
-        const hit = await resolveInDir(focus.cwd, expandUser(cand))
-        if (request !== openRequest) return false
-        if (hit) {
-          return await sendFile(win, hit, request, norm.selection)
+      let tier0Roots = [focus.cwd]
+      if (!focus.exact && process.platform === 'darwin') {
+        try {
+          const all = await rootsPromise
+          const under = all.filter((r) => r === focus.cwd || r.startsWith(focus.cwd + path.sep))
+          tier0Roots = [...under, ...tier0Roots.filter((r) => !under.includes(r))]
+        } catch {
+          // Live-roots scan failed — shell cwd alone is still useful.
         }
+      }
+      for (const cand of candidates) {
+        const hits: string[] = []
+        for (const root of tier0Roots) {
+          const hit = await resolveInDir(root, expandUser(cand))
+          if (request !== openRequest) return false
+          if (hit && !hits.includes(hit)) hits.push(hit)
+          if (hits.length > 1) break
+        }
+        if (hits.length === 1) {
+          return await sendFile(win, hits[0], request, norm.selection)
+        }
+        // Several hits: stop Tier 0 and fall through to the live-roots
+        // tier, which re-checks the same roots and shows the picker.
+        if (hits.length > 1) break
       }
     }
   }
@@ -226,7 +250,6 @@ function createWindow(): void {
     autoHideMenuBar: true,
     frame: false,
     titleBarStyle: 'hidden',
-    trafficLightPosition: { x: 12, y: 12 },
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: true,
@@ -234,6 +257,10 @@ function createWindow(): void {
       nodeIntegration: false
     }
   })
+
+  // The renderer draws its own min/max/close buttons (TitleBar.tsx) —
+  // hide the native traffic lights so they don't overlap the file path.
+  if (process.platform === 'darwin') mainWindow.setWindowButtonVisibility(false)
 
   mainWindow.on('ready-to-show', () => {
     mainWindow?.maximize()

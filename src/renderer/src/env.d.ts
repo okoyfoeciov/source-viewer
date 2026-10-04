@@ -39,6 +39,7 @@ export interface ElectronClipboard {
 declare global {
   interface Window {
     api: Record<string, never>
+    platform: NodeJS.Platform
     windowControls: WindowControls
     files: FilesApi
     electronClipboard: ElectronClipboard

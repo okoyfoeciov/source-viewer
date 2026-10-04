@@ -38,6 +38,10 @@ export default function DiffViewer({
     const ls = buildFullFile(content, parseUnifiedDiff(diff))
     return { lines: ls, markers: markersForLines(ls) }
   }, [content, diff])
+  // Gutter width grows with the digit count so 5+ digit line numbers
+  // never overflow into the left edge (3.5em CSS fallback + 12px left pad).
+  const maxNo = lines.reduce((m, l) => Math.max(m, l.oldNo ?? 0, l.newNo ?? 0), 0)
+  const gutterStyle = { width: `calc(${String(Math.max(maxNo, 1)).length}ch + 32px)` }
 
   const [anchor, setAnchor] = useState<number | null>(null)
   const [current, setCurrent] = useState<number | null>(null)
@@ -109,8 +113,9 @@ export default function DiffViewer({
       className="code-viewer"
       annotations={markers}
       revealLine={selection === null ? null : selection.start}
+      onClick={onClearSelection}
     >
-      <div className="diff" onClick={onClearSelection} style={{ fontFamily: MONO }}>
+      <div className="diff" style={{ fontFamily: MONO }}>
         {lines.map((line, i) => (
           <div
             key={i}
@@ -121,13 +126,16 @@ export default function DiffViewer({
                 : `diff-line diff-line-${line.type}`
             }
           >
-            <span className="diff-gutter">{line.oldNo ?? ''}</span>
+            <span className="diff-gutter" style={gutterStyle}>
+              {line.oldNo ?? ''}
+            </span>
             <span
               className={
                 line.newNo !== null
                   ? 'diff-gutter diff-gutter-copyable'
                   : 'diff-gutter'
               }
+              style={gutterStyle}
               title={
                 line.newNo !== null ? 'Click to copy line ref, drag for range' : undefined
               }

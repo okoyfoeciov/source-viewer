@@ -25,6 +25,10 @@ export default function CodeViewer({
     () => highlightLines(content, detectLanguage(fileName)),
     [content, fileName]
   )
+  // Gutter width grows with the digit count so 5+ digit line numbers
+  // never overflow into the left edge (3.5em CSS fallback + 12px left pad).
+  const digits = String(html.length).length
+  const gutterStyle = { width: `calc(${digits}ch + 32px)` }
   const [anchor, setAnchor] = useState<number | null>(null)
   const [current, setCurrent] = useState<number | null>(null)
   const anchorRef = useRef<number | null>(null)
@@ -76,8 +80,9 @@ export default function CodeViewer({
     <CustomScroll
       className="code-viewer"
       revealLine={selection === null ? null : selection.start}
+      onClick={onClearSelection}
     >
-      <div className="code" onClick={onClearSelection} style={{ fontFamily: MONO }}>
+      <div className="code" style={{ fontFamily: MONO }}>
         {html.map((h, i) => {
           const n = i + 1
           const selected = inSelection(n) || inDrag(n)
@@ -89,6 +94,7 @@ export default function CodeViewer({
             >
               <span
                 className="code-gutter code-gutter-copyable"
+                style={gutterStyle}
                 title="Click to copy line ref, drag for range"
                 onMouseDown={onGutterDown(n)}
                 onMouseEnter={() => onGutterEnter(n)}

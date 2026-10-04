@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react'
+import type {
+  MouseEvent as ReactMouseEvent,
+  PointerEvent as ReactPointerEvent,
+  ReactNode
+} from 'react'
 import { sliderRatio, thumbGeometry } from '../scrollMath'
 
 const TRACK_SIZE = 12
@@ -19,13 +23,20 @@ interface CustomScrollProps {
   annotations?: Array<{ top: number; height: number; kind: 'add' | 'del' }>
   /** New-file line number to scroll into view (centered); null disables. */
   revealLine?: number | null
+  /**
+   * Clicks anywhere in the scroll viewport — including the empty area past
+   * short content, which is outside `children` and would otherwise miss
+   * content-level onClick handlers.
+   */
+  onClick?: (e: ReactMouseEvent<HTMLDivElement>) => void
 }
 
 export default function CustomScroll({
   className,
   children,
   annotations,
-  revealLine = null
+  revealLine = null,
+  onClick
 }: CustomScrollProps): React.JSX.Element {
   const viewRef = useRef<HTMLDivElement>(null)
   const vTrackRef = useRef<HTMLDivElement>(null)
@@ -166,7 +177,7 @@ export default function CustomScroll({
 
   return (
     <div className={className ? `cs ${className}` : 'cs'}>
-      <div ref={viewRef} className="cs-view" tabIndex={0} onScroll={sync}>
+      <div ref={viewRef} className="cs-view" tabIndex={0} onScroll={sync} onClick={onClick}>
         {children}
       </div>
       {vVisible && (

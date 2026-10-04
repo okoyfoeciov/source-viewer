@@ -35,6 +35,13 @@ body {
   overflow: hidden;
 }
 
+/* Frameless windows on macOS are edge-to-edge: the inset border reads as
+   a stray light outline and the radius cuts the maximized corners. */
+html[data-platform='darwin'] .app {
+  border: none;
+  border-radius: 0;
+}
+
 .content {
   flex: 1;
   display: flex;
@@ -198,6 +205,7 @@ body {
   width: 3.5em;
   flex-shrink: 0;
   text-align: right;
+  padding-left: 12px;
   padding-right: 1.2em;
   color: #5a5a5a;
   user-select: none;
@@ -281,6 +289,7 @@ body {
   width: 3.5em;
   flex-shrink: 0;
   text-align: right;
+  padding-left: 12px;
   padding-right: 1.2em;
   color: #5a5a5a;
   user-select: none;

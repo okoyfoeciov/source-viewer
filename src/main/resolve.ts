@@ -195,15 +195,24 @@ async function listAgentProcs(): Promise<AgentProc[]> {
   // NOTE: flag shapes differ per platform — `ps -eo -o ...` is a syntax
   // error on Linux (procps), so the format flag must ride on the same argv
   // element as the selection flag set.
+  // The tty column filters headless helpers: real agent TUIs own a tty
+  // (ttys*/pts/*); Chrome native-host helpers and `opencode serve`
+  // daemons show `?`/`??` and would otherwise pollute the roots.
   const args =
-    process.platform === 'darwin' ? ['-ax', '-o', 'pid=,comm='] : ['-eo', 'pid=,comm=']
+    process.platform === 'darwin'
+      ? ['-ax', '-o', 'pid=,tty=,comm=']
+      : ['-eo', 'pid=,tty=,comm=']
   const { stdout } = await execFileAsync('ps', args)
   const procs: AgentProc[] = []
   for (const line of stdout.split('\n')) {
     const parts = line.trim().split(/\s+/)
-    if (parts.length < 2) continue
+    if (parts.length < 3) continue
     const pid = parseInt(parts[0], 10)
-    const comm = path.basename(parts[parts.length - 1]).toLowerCase()
+    const tty = parts[1]
+    // macOS script-wrapped binaries report a full path in comm=
+    // (e.g. /Users/you/.local/bin/claude) — basename it.
+    const comm = path.basename(parts.slice(2).join(' ')).toLowerCase()
+    if (tty === '?' || tty === '??') continue
     if (Number.isFinite(pid) && pid !== process.pid && AGENT_COMMANDS.has(comm)) {
       procs.push({ pid, comm })
     }
@@ -225,18 +234,23 @@ async function getLinuxCwds(procs: AgentProc[]): Promise<Array<{ comm: string; c
 }
 
 async function getMacCwds(procs: AgentProc[]): Promise<Array<{ comm: string; cwd: string }>> {
+  if (procs.length === 0) return []
   // One lsof call for all pids: `-F pn` prints `p<pid>` / `n<path>` lines.
   const byPid = new Map(procs.map((p) => [p.pid, p.comm]))
   try {
-    const { stdout } = await execFileAsync('lsof', [
-      '-a',
-      '-p',
-      procs.map((p) => p.pid).join(','),
-      '-d',
-      'cwd',
-      '-F',
-      'pn'
-    ])
+    const { stdout } = await execFileAsync(
+      'lsof',
+      [
+        '-a',
+        '-p',
+        procs.map((p) => p.pid).join(','),
+        '-d',
+        'cwd',
+        '-F',
+        'pn'
+      ],
+      { timeout: 5000 }
+    )
     const roots: Array<{ comm: string; cwd: string }> = []
     let pid = 0
     for (const line of stdout.split('\n')) {

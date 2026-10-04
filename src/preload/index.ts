@@ -77,6 +77,8 @@ const electronClipboard: ElectronClipboard = {
 }
 
 try {
+  // Lets the renderer adapt per-OS (e.g. no inset border on macOS).
+  contextBridge.exposeInMainWorld('platform', process.platform)
   contextBridge.exposeInMainWorld('api', api)
   contextBridge.exposeInMainWorld('windowControls', windowControls)
   contextBridge.exposeInMainWorld('files', files)
