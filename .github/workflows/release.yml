@@ -1,19 +1,33 @@
-name: Release (Linux)
+# CD: .deb built from latest master, published to the v0.1.0 tag.
+#
+# Runs on every push to master (plus manual dispatch). It builds the .deb
+# on Linux, then (re)publishes it to the v0.1.0 release, clobbering the
+# previous asset — same pattern as ~/cairn's release.yml.
+#
+# No version automation: there is exactly one version, 0.1.0, and this
+# file names it outright. Bump package.json + the tag below together.
 
-# Cut a release by tagging, e.g.:
-#   npm version patch && git push origin master --tags
-# Builds the AppImage + deb and attaches them to a GitHub Release.
+name: Release 0.1.0
+
 on:
   push:
-    tags:
-      - 'v*'
+    branches: [master]
+  workflow_dispatch:
+
+# Latest push wins: a newer run cancels the older one's build, and the
+# publish step uploads with --clobber, so a cancelled run can never leave
+# the release half-updated.
+concurrency:
+  group: release-0.1.0
+  cancel-in-progress: true
 
 permissions:
   contents: write
 
 jobs:
-  package-linux:
+  deb:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
@@ -22,13 +36,43 @@ jobs:
           node-version: 22
           cache: npm
 
-      - run: npm ci
+      - name: Install dependencies
+        run: npm ci
 
-      - run: npm run dist:linux
+      - name: Install packaging tools
+        run: sudo apt-get update && sudo apt-get install -y fakeroot
 
-      - uses: softprops/action-gh-release@v2
+      - name: Build the .deb
+        run: npm run dist:deb
+
+      - uses: actions/upload-artifact@v4
         with:
-          files: |
-            dist/*.AppImage
-            dist/*.deb
-          fail_on_unmatched_files: true
+          name: deb
+          path: dist/*.deb
+          if-no-files-found: error
+
+  publish:
+    needs: [deb]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # gh release create tags v0.1.0, and tagging needs the git directory.
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Publish the v0.1.0 release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cd dist
+          if ! gh release view v0.1.0 >/dev/null 2>&1; then
+            gh release create v0.1.0 \
+              --title "Source Viewer 0.1.0" \
+              --notes "Source Viewer 0.1.0 build from latest master. Debian: sudo apt install ./source-viewer_0.1.0_amd64.deb." \
+              --latest
+          fi
+          gh release upload v0.1.0 ./*.deb --clobber
