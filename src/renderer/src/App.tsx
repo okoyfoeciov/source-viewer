@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import TitleBar from './components/TitleBar'
 import CodeViewer from './components/CodeViewer'
 import DiffViewer from './components/DiffViewer'
+import ImageViewer from './components/ImageViewer'
+import PdfViewer from './components/PdfViewer'
 import CandidatesPicker from './components/CandidatesPicker'
 import type { FileCandidates, FileOpenError, OpenedFile } from './env'
 
@@ -44,7 +46,15 @@ export default function App(): React.JSX.Element {
       <TitleBar filePath={file?.filePath ?? null} />
       <main className="content">
         {file ? (
-          file.diff ? (
+          file.kind === 'image' && file.dataUrl ? (
+            <ImageViewer
+              key={`image:${file.filePath}`}
+              fileName={file.fileName}
+              dataUrl={file.dataUrl}
+            />
+          ) : file.kind === 'pdf' && file.dataUrl ? (
+            <PdfViewer key={`pdf:${file.filePath}`} dataUrl={file.dataUrl} />
+          ) : file.diff ? (
             <DiffViewer
               key={`diff:${file.filePath}`}
               filePath={file.filePath}

@@ -15,6 +15,12 @@ export interface OpenedFile {
   diff: string | null
   head: string | null
   selection: { start: number; end: number } | null
+  /** Delivery kind, classified by the main process (see src/main/filetype). */
+  kind: 'text' | 'image' | 'pdf'
+  /** MIME type for image/pdf, null for text. */
+  mime: string | null
+  /** Base64 data URL for image/pdf, null for text. */
+  dataUrl: string | null
 }
 
 export interface FileOpenError {

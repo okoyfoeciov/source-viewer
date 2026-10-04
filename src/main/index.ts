@@ -14,6 +14,7 @@ import {
   resolvePublishedFallback
 } from './resolve'
 import { FocusWatcher } from './focus'
+import { classifyFile } from './filetype'
 import { getFileDiff } from './git'
 import { shouldHandle, shouldResendPicker } from './clipwatch'
 
@@ -57,6 +58,34 @@ async function sendFile(
     return false
   }
 
+  const { kind, mime } = classifyFile(path.basename(filePath))
+  if (kind !== 'text') {
+    // Images/PDFs travel as data URLs — the sandboxed renderer has no file
+    // access of its own. Git diff is skipped: binary has no diff, and SVG
+    // is deliberately shown rendered rather than diffed.
+    try {
+      const data = await fs.readFile(filePath)
+      if (request !== openRequest) return false
+      win.webContents.send('file:open', {
+        filePath,
+        fileName: path.basename(filePath),
+        content: '',
+        diff: null,
+        head: null,
+        selection: null,
+        kind,
+        mime,
+        dataUrl: `data:${mime as string};base64,${data.toString('base64')}`
+      })
+      return true
+    } catch {
+      if (request === openRequest) {
+        win.webContents.send('file:open-error', { filePath, message: 'Could not read file' })
+      }
+      return false
+    }
+  }
+
   try {
     // Content and diff are independent — fetch concurrently.
     const [content, git] = await Promise.all([
@@ -74,7 +103,10 @@ async function sendFile(
       content,
       diff: git?.diff ?? null,
       head: git?.head ?? null,
-      selection
+      selection,
+      kind: 'text',
+      mime: null,
+      dataUrl: null
     })
     return true
   } catch {
@@ -254,7 +286,9 @@ function createWindow(): void {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: true,
       contextIsolation: true,
-      nodeIntegration: false
+      nodeIntegration: false,
+      // Enables Chromium's built-in PDF viewer for the <embed> tag.
+      plugins: true
     }
   })
 

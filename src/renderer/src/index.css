@@ -319,6 +319,40 @@ html[data-platform='darwin'] .app {
   background-image: linear-gradient(rgba(56, 139, 253, 0.22), rgba(56, 139, 253, 0.22));
 }
 
+/* ---- Image / PDF viewers (no gutters, no line features) ---- */
+
+.image-viewer {
+  flex: 1;
+  background-color: #1e1e1e;
+}
+
+.image-wrap {
+  min-height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.image-canvas {
+  max-width: 100%;
+  max-height: calc(100vh - 88px);
+  object-fit: contain;
+  /* Checkerboard so transparency reads as transparency. */
+  background-image: conic-gradient(#2a2a2a 0 25%, #222 0 50%, #2a2a2a 0 75%, #222 0);
+  background-size: 16px 16px;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.pdf-canvas {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  border: none;
+  background-color: #1e1e1e;
+}
+
 /* ---- Candidates picker ---- */
 
 .candidates {
