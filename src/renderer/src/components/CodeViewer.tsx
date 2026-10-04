@@ -27,23 +27,8 @@ export default function CodeViewer({
   )
   const [anchor, setAnchor] = useState<number | null>(null)
   const [current, setCurrent] = useState<number | null>(null)
-  const [copiedRef, setCopiedRef] = useState<string | null>(null)
   const anchorRef = useRef<number | null>(null)
   const currentRef = useRef<number | null>(null)
-  const toastTimer = useRef<number | null>(null)
-
-  useEffect(
-    () => () => {
-      if (toastTimer.current !== null) window.clearTimeout(toastTimer.current)
-    },
-    []
-  )
-
-  const showToast = (text: string): void => {
-    setCopiedRef(text)
-    if (toastTimer.current !== null) window.clearTimeout(toastTimer.current)
-    toastTimer.current = window.setTimeout(() => setCopiedRef(null), 1500)
-  }
 
   // Window mouseup completes a gutter drag (click or drag-select).
   useEffect(() => {
@@ -56,9 +41,7 @@ export default function CodeViewer({
       setAnchor(null)
       setCurrent(null)
       const ref = formatLineRef(filePath, a, c)
-      void copyText(ref).then((ok) => {
-        if (ok) showToast(ref)
-      })
+      void copyText(ref)
     }
     window.addEventListener('mouseup', onUp)
     return () => window.removeEventListener('mouseup', onUp)
@@ -120,7 +103,6 @@ export default function CodeViewer({
           )
         })}
       </div>
-      {copiedRef && <div className="copy-toast">{copiedRef}</div>}
     </CustomScroll>
   )
 }

@@ -41,17 +41,8 @@ export default function DiffViewer({
 
   const [anchor, setAnchor] = useState<number | null>(null)
   const [current, setCurrent] = useState<number | null>(null)
-  const [copiedRef, setCopiedRef] = useState<string | null>(null)
   const anchorRef = useRef<number | null>(null)
   const currentRef = useRef<number | null>(null)
-  const toastTimer = useRef<number | null>(null)
-
-  useEffect(
-    () => () => {
-      if (toastTimer.current !== null) window.clearTimeout(toastTimer.current)
-    },
-    []
-  )
 
   useEffect(() => {
     const onUp = (): void => {
@@ -63,13 +54,7 @@ export default function DiffViewer({
       setAnchor(null)
       setCurrent(null)
       const ref = formatLineRef(filePath, a, c)
-      void copyText(ref).then((ok) => {
-        if (ok) {
-          setCopiedRef(ref)
-          if (toastTimer.current !== null) window.clearTimeout(toastTimer.current)
-          toastTimer.current = window.setTimeout(() => setCopiedRef(null), 1500)
-        }
-      })
+      void copyText(ref)
     }
     window.addEventListener('mouseup', onUp)
     return () => window.removeEventListener('mouseup', onUp)
@@ -162,7 +147,6 @@ export default function DiffViewer({
           </div>
         ))}
       </div>
-      {copiedRef && <div className="copy-toast">{copiedRef}</div>}
     </CustomScroll>
   )
 }
