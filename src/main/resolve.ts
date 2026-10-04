@@ -89,6 +89,17 @@ export async function collectRoots(): Promise<string[]> {
   return out
 }
 
+/** Resolve a relative path against a single dir. Returns the file or null. */
+export async function resolveInDir(dir: string, relPath: string): Promise<string | null> {
+  const full = path.resolve(dir, relPath)
+  try {
+    const stat = await fs.stat(full)
+    return stat.isFile() ? full : null
+  } catch {
+    return null
+  }
+}
+
 /** Resolve a relative path against roots (in order). Returns existing files, capped. */
 export async function resolveAgainstRoots(roots: string[], relPath: string): Promise<string[]> {
   const matches: string[] = []

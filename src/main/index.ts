@@ -8,13 +8,16 @@ import {
   collectRoots,
   expandUser,
   normalizeClipboard,
-  resolveAgainstRoots
+  resolveAgainstRoots,
+  resolveInDir
 } from './resolve'
+import { FocusWatcher } from './focus'
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024
 
 let mainWindow: BrowserWindow | null = null
 let openRequest = 0
+const focusWatcher = new FocusWatcher()
 
 async function sendFile(win: BrowserWindow, filePath: string, request: number): Promise<boolean> {
   let stat: { isFile(): boolean; size: number }
@@ -69,6 +72,23 @@ async function openClipboardPath(win: BrowserWindow): Promise<void> {
       win.webContents.send('file:open-error', { filePath: norm.raw, message: 'File not found' })
     }
     return
+  }
+
+  // Tier 0: the focused terminal's foreground agent cwd. Single root —
+  // hit opens immediately, miss falls through (existence is always checked,
+  // so a stale reading can never open the wrong file).
+  if (norm.kind === 'relative') {
+    const focus = focusWatcher.getLast()
+    if (focus) {
+      for (const cand of candidates) {
+        const hit = await resolveInDir(focus.cwd, expandUser(cand))
+        if (request !== openRequest) return
+        if (hit) {
+          await sendFile(win, hit, request)
+          return
+        }
+      }
+    }
   }
 
   // One tier: every live agent root is consulted; a single match opens,
@@ -170,6 +190,7 @@ app.whenReady().then(() => {
   })
 
   registerWindowControls()
+  focusWatcher.start()
   createWindow()
 
   app.on('activate', () => {
