@@ -168,6 +168,58 @@ export async function resolveAgainstRoots(roots: string[], relPath: string): Pro
   return matches
 }
 
+const SKIP_DIRS = new Set(['node_modules', '.git', '.next', '.turbo', '.cache', 'dist', 'build', 'out'])
+const SUBDIR_MAX_DEPTH = 3
+const SUBDIR_MAX_VISITED = 3000
+
+/**
+ * Fallback when `relPath` misses every root directly: an agent's process cwd
+ * can sit above its logical cwd (e.g. `claude -w` worktree root vs
+ * `apps/client`), so look a few levels down for a subdir that has the file.
+ * Bounded by depth and total dirs visited; skips heavy/generated dirs.
+ */
+export async function resolveInSubdirs(roots: string[], relPath: string): Promise<string[]> {
+  const matches: string[] = []
+  const seenFiles = new Set<string>()
+  const seenDirs = new Set<string>()
+  let visited = 0
+  for (const root of roots) {
+    let level = [path.resolve(root)]
+    for (let depth = 0; depth < SUBDIR_MAX_DEPTH && level.length > 0; depth++) {
+      const next: string[] = []
+      for (const dir of level) {
+        let entries: import('fs').Dirent[]
+        try {
+          entries = await fs.readdir(dir, { withFileTypes: true })
+        } catch {
+          continue
+        }
+        for (const e of entries) {
+          if (!e.isDirectory() || SKIP_DIRS.has(e.name)) continue
+          const sub = path.join(dir, e.name)
+          if (seenDirs.has(sub)) continue
+          seenDirs.add(sub)
+          if (++visited > SUBDIR_MAX_VISITED) return matches
+          next.push(sub)
+          const full = path.resolve(sub, relPath)
+          if (seenFiles.has(full)) continue
+          try {
+            if ((await fs.stat(full)).isFile()) {
+              seenFiles.add(full)
+              matches.push(full)
+              if (matches.length >= MAX_MATCHES) return matches
+            }
+          } catch {
+            // Not in this subdir.
+          }
+        }
+      }
+      level = next
+    }
+  }
+  return matches
+}
+
 // ---- live agent processes -------------------------------------------------
 
 const AGENT_COMMANDS = new Set(['opencode', 'claude', 'codex'])

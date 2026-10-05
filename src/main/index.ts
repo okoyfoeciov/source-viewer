@@ -11,6 +11,7 @@ import {
   normalizeClipboard,
   resolveAgainstRoots,
   resolveInDir,
+  resolveInSubdirs,
   resolvePublishedFallback
 } from './resolve'
 import { FocusWatcher } from './focus'
@@ -242,23 +243,29 @@ async function resolveAndOpen(win: BrowserWindow, raw: string): Promise<boolean>
   // several show the picker.
   const roots = await rootsPromise
   if (request !== openRequest) return false
-  for (const cand of candidates) {
-    const matches = await resolveAgainstRoots(roots, expandUser(cand))
-    if (request !== openRequest) return false
-    if (matches.length === 1) {
-      pickerSquelch = null
-      return await sendFile(win, matches[0], request, norm.selection)
-    }
-    if (matches.length > 1) {
-      const decision = shouldResendPicker(norm.raw, pickerSquelch, Date.now())
-      pickerSquelch = decision.squelch
-      if (decision.send) {
-        win.webContents.send('file:candidates', { query: norm.raw, paths: matches })
-        // Prompting consumes the query: no re-prompt on refocus, and the
-        // squelch above stays armed for copies made before this clear lands.
-        consumeClipboard()
+  // Direct pass first; only if every root misses, look a few levels down
+  // (agent process cwd can sit above its logical cwd, e.g. `claude -w`
+  // worktree root vs apps/client).
+  const passes = [resolveAgainstRoots, resolveInSubdirs]
+  for (const resolvePass of passes) {
+    for (const cand of candidates) {
+      const matches = await resolvePass(roots, expandUser(cand))
+      if (request !== openRequest) return false
+      if (matches.length === 1) {
+        pickerSquelch = null
+        return await sendFile(win, matches[0], request, norm.selection)
       }
-      return false
+      if (matches.length > 1) {
+        const decision = shouldResendPicker(norm.raw, pickerSquelch, Date.now())
+        pickerSquelch = decision.squelch
+        if (decision.send) {
+          win.webContents.send('file:candidates', { query: norm.raw, paths: matches })
+          // Prompting consumes the query: no re-prompt on refocus, and the
+          // squelch above stays armed for copies made before this clear lands.
+          consumeClipboard()
+        }
+        return false
+      }
     }
   }
   if (request === openRequest) {
