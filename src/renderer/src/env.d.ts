@@ -29,13 +29,14 @@ export interface FileOpenError {
 export interface FileCandidates {
   query: string
   paths: string[]
+  selection: { start: number; end: number } | null
 }
 
 export interface FilesApi {
   onFileOpen: (cb: (file: OpenedFile) => void) => () => void
   onFileError: (cb: (err: FileOpenError) => void) => () => void
   onCandidates: (cb: (c: FileCandidates) => void) => () => void
-  openPath: (filePath: string) => void
+  openPath: (filePath: string, selection?: { start: number; end: number } | null) => void
 }
 
 export interface ElectronClipboard {

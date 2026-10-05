@@ -30,7 +30,8 @@ export default function CandidatesPicker({
     setSelected(0)
   }, [candidates])
 
-  const open = (filePath: string): void => window.files?.openPath(filePath)
+  const open = (filePath: string): void =>
+    window.files?.openPath(filePath, candidates.selection ?? null)
 
   // Rows show only the part that differs between matches. The title
   // already shows the shared query tail, so both the common root prefix

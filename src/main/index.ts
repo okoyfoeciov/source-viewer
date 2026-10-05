@@ -17,15 +17,12 @@ import {
 import { FocusWatcher } from './focus'
 import { classifyFile } from './filetype'
 import { getFileDiff } from './git'
-import { shouldHandle, shouldResendPicker } from './clipwatch'
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024
 
 let mainWindow: BrowserWindow | null = null
 let openRequest = 0
 const focusWatcher = new FocusWatcher()
-let dedupeState: { raw: string; at: number } | null = null
-let pickerSquelch: { query: string; until: number } | null = null
 /**
  * Last text copied *from inside the app* (title bar / gutter click-drag).
  * The focus watcher opens whatever is in the clipboard, so without this an
@@ -154,9 +151,6 @@ async function handleClipboardText(win: BrowserWindow, raw: string): Promise<boo
     if (raw === lastInternalCopy) return false
     lastInternalCopy = null
   }
-  const decision = shouldHandle(raw, dedupeState, Date.now())
-  dedupeState = decision.state
-  if (!decision.handle) return false
 
   try {
     return await resolveAndOpen(win, raw)
@@ -252,18 +246,17 @@ async function resolveAndOpen(win: BrowserWindow, raw: string): Promise<boolean>
       const matches = await resolvePass(roots, expandUser(cand))
       if (request !== openRequest) return false
       if (matches.length === 1) {
-        pickerSquelch = null
         return await sendFile(win, matches[0], request, norm.selection)
       }
       if (matches.length > 1) {
-        const decision = shouldResendPicker(norm.raw, pickerSquelch, Date.now())
-        pickerSquelch = decision.squelch
-        if (decision.send) {
-          win.webContents.send('file:candidates', { query: norm.raw, paths: matches })
-          // Prompting consumes the query: no re-prompt on refocus, and the
-          // squelch above stays armed for copies made before this clear lands.
-          consumeClipboard()
-        }
+        win.webContents.send('file:candidates', {
+          query: norm.raw,
+          paths: matches,
+          selection: norm.selection
+        })
+        // Prompting consumes the query so a later refocus with an
+        // untouched clipboard is a no-op (empty text resolves to nothing).
+        consumeClipboard()
         return false
       }
     }
@@ -368,13 +361,28 @@ function registerWindowControls(): void {
   ipcMain.handle('window:is-maximized', () => {
     return BrowserWindow.getFocusedWindow()?.isMaximized() ?? false
   })
-  ipcMain.on('file:open-path', (event, filePath: unknown) => {
+  ipcMain.on('file:open-path', (event, filePath: unknown, sel: unknown) => {
     if (typeof filePath !== 'string') return
     const norm = normalizeClipboard(filePath)
     if (!norm || norm.kind !== 'absolute') return
+    // The picker forwards the original query's :line/:range separately
+    // (picked paths are already stripped), so prefer an explicit valid
+    // selection and fall back to any suffix on the path itself.
+    let selection = norm.selection
+    if (
+      sel !== null &&
+      sel !== undefined &&
+      typeof sel === 'object' &&
+      Number.isInteger((sel as { start: number }).start) &&
+      Number.isInteger((sel as { end: number }).end) &&
+      (sel as { start: number }).start >= 1 &&
+      (sel as { end: number }).end >= (sel as { start: number }).start
+    ) {
+      selection = sel as { start: number; end: number }
+    }
     const win = BrowserWindow.fromWebContents(event.sender)
     if (win) {
-      void sendFile(win, expandUser(norm.raw), ++openRequest, null).then((opened) => {
+      void sendFile(win, expandUser(norm.stripped), ++openRequest, selection).then((opened) => {
         if (opened) consumeClipboard()
       })
     }
